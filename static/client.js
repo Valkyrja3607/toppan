@@ -436,7 +436,7 @@
       if (tEl) tEl.classList.add("is-turn");
     }
 
-    // 中央の「手番」表示も名前込みに（例: 東・Kawano）
+    // 中央の「手番」表示も名前込みに（例: 東・Name）
     const turnP = state.players.find(p => p.seat === state.turn_seat);
     if (UI.turnEl) UI.turnEl.textContent =
       (turnP ? `${state.seats[state.turn_seat]}・${turnP.name}` : "-");
