@@ -1,0 +1,817 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  background: #0a0f1f;
+  color: #eef2ff;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+header {
+  background: #0d1329;
+  padding: 12px 16px;
+  border-bottom: 1px solid #1f2647;
+}
+
+h1 {
+  margin: 0 0 6px 0;
+  font-weight: 700;
+}
+
+h1 small {
+  font-weight: 400;
+  opacity: 0.7;
+  font-size: 0.6em;
+}
+
+.room-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.room-controls input,
+.room-controls button {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #334;
+  background: #101737;
+  color: #eef2ff;
+}
+
+.room-controls button {
+  background: #1b2560;
+  cursor: pointer;
+}
+
+#status {
+  margin-top: 8px;
+  opacity: 0.85;
+}
+
+main {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  height: calc(100vh - 90px);
+}
+
+#sidebar {
+  border-left: 1px solid #1f2647;
+  padding: 12px;
+  background: #0f152f;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panel {
+  background: #10183a;
+  padding: 10px;
+  border: 1px solid #243;
+  border-radius: 12px;
+}
+.chat-log > div{
+  white-space: pre-line;
+}
+.chat-log {
+  max-height: 320px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 8px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.system-msg{
+  opacity: 0.85;
+  color: #bfe2ff;
+  font-style: italic;
+}
+
+/* Felt table */
+.mahjong-table {
+  position: relative;
+  background: radial-gradient(ellipse at center, #0c5b5b 0%, #083044 60%, #07192a 100%);
+  border-right: 1px solid #1f2647;
+  height: 100%;
+  padding-bottom: 110px;
+}
+
+/* 固定アクションバー（卓の最前面に） */
+.action-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  z-index: 100;
+  /* 最前面に */
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(6px);
+}
+
+/* iOSなどのセーフエリア対応（あれば加算） */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .mahjong-table {
+    padding-bottom: calc(110px + env(safe-area-inset-bottom));
+  }
+
+  .seat-bottom {
+    bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+}
+
+/* Seats */
+.seat {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #e9f5ff;
+}
+
+.seat-label {
+  position: absolute;
+  top: -26px;
+  font-size: 18px;
+  font-weight: 700;
+  opacity: 1;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(120, 170, 255, 0.45);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+}
+.seat-bottom .seat-label{
+  top: -46px;
+}
+.seat-left .seat-label,
+.seat-right .seat-label{
+  white-space: pre-line;
+}
+
+.wind-badge {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 2px 6px;
+  border-radius: 10px;
+  margin-left: 6px;
+}
+
+/* Positions */
+.seat-bottom {
+  left: 50%;
+  transform: translateX(-50%);
+  /* アクションバーの上に上げる（10px + 90px マージン） */
+  bottom: 100px;
+  width: 80%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.seat-top {
+  left: 50%;
+  transform: translateX(-50%);
+  top: 28px;
+  width: 70%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.seat-left {
+  top: 50%;
+  transform: translateY(-50%);
+  left: 120px;
+  height: 66%;
+  flex-direction: column;
+}
+
+.seat-right {
+  top: 50%;
+  transform: translateY(-50%);
+  right: 120px;
+  height: 66%;
+  flex-direction: column;
+}
+
+/* --- 親バッジ & 手番ハイライト --- */
+.seat.is-dealer .seat-label::after{
+  content:"親";
+  display:inline-block;
+  margin-left:6px;
+  padding:2px 6px;
+  font-size:12px;
+  font-weight:700;
+  color:#0f172a;
+  background:#ffd166;                   /* 目立つ黄色 */
+  border-radius:999px;
+  border:1px solid rgba(0,0,0,.15);
+}
+
+
+.seat.is-turn::before{
+  content:"";
+  position:absolute;
+  inset:-8px;                           /* 座席ブロックの外側に光輪 */
+  border-radius:14px;
+  border:2px solid rgba(255,209,102,.9);
+  box-shadow:0 0 18px rgba(255,209,102,.45);
+  pointer-events:none;
+  animation:turnPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes turnPulse{
+  0%   { opacity: .9; transform: scale(1.00); }
+  50%  { opacity: .6; transform: scale(1.02); }
+  100% { opacity: .9; transform: scale(1.00); }
+}
+
+/* 名前側も少し強調（読みやすさUP） */
+.seat.is-turn .seat-label{
+  text-shadow: 0 0 8px rgba(255,209,102,.35);
+}
+
+.center-field {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  height: 260px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.round-info {
+  text-align: center;
+  font-size: 14px;
+}
+
+/* Hands & Rivers */
+.hand-horizontal,
+.river-horizontal {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: center;
+}
+
+.hand-horizontal.reversed {
+  flex-direction: row-reverse;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* デフォルトは表示しておく */
+#actionBar {
+  display: flex;
+}
+
+/* ゲーム開始後は actionBar ごと消す（最優先） */
+body.game-playing #actionBar {
+  display: none !important;
+}
+
+/* 旧構成でボタンがバラに置いてある場合の保険 */
+body.game-playing #btnReady,
+body.game-playing #btnUnready,
+body.game-playing #btnStart,
+body.game-playing #btnDraw {
+  display: none !important;
+}
+
+/* ボタンが消えたら下家を下に寄せる＆余白を詰める */
+body.game-playing .mahjong-table {
+  padding-bottom: 24px;
+}
+
+body.game-playing .seat-bottom {
+  bottom: 24px;
+}
+
+/* 待機中（開始前）は表示を戻す */
+body.game-waiting #actionBar {
+  display: flex;
+}
+
+.hand-vertical,
+.river-vertical {
+  display: flex;
+  gap: 4px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.actions button {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #3a4a90;
+  background: #24306b;
+  color: #eef2ff;
+  cursor: pointer;
+}
+
+/* Tiles (image based) */
+.tile-img {
+  width: 40px;
+  height: 60px;
+  image-rendering: auto;
+  filter: drop-shadow(0 2px 1px rgba(0, 0, 0, .35));
+}
+
+.tile-img.small {
+  width: 28px;
+  height: 42px;
+}
+
+.tile-back {
+  background: rgba(255, 255, 255, 0.12);
+  width: 40px;
+  height: 60px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Clickable hint */
+.clickable {
+  cursor: pointer;
+  transform: translateY(0);
+  transition: transform 80ms ease;
+}
+
+.clickable:hover {
+  transform: translateY(-4px);
+}
+
+/* Rivers arranged in rows of 6 like many UIs */
+.river-horizontal,
+.river-vertical {
+  --cols: 6;
+  display: grid;
+  gap: 4px;
+}
+
+.river-horizontal {
+  grid-template-columns: repeat(var(--cols), 28px);
+}
+
+.river-vertical {
+  grid-template-rows: repeat(var(--cols), 28px);
+}
+
+/* Fallback text-tile (if image missing) */
+.tile-fallback {
+  width: 40px;
+  height: 60px;
+  background: #f9f9f3;
+  border: 2px solid #ddd;
+  border-bottom-width: 4px;
+  border-radius: 6px;
+  color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.tile-fallback.small {
+  width: 28px;
+  height: 42px;
+  font-size: 11px;
+}
+
+.pts-input{
+  width: 120px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #334;
+  background: #101737;
+  color: #eef2ff;
+  margin-right: 10px;
+}
+.hidden{ display:none !important; }
+.bet-notice{
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(255, 214, 102, 0.18);
+  border: 1px solid rgba(255, 214, 102, 0.45);
+  color: #ffe9a9;
+  font-size: 12px;
+  display: inline-block;
+}
+.bet-panel{
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.reset-panel{
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reset-label{
+  font-size: 12px;
+  opacity: 0.85;
+}
+.stats-bar{
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(10, 20, 40, 0.85);
+  border: 1px solid rgba(120, 170, 255, 0.35);
+  color: #e9f5ff;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+.stats-bar .stat{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.stats-bar .stat-sep{
+  opacity: 0.5;
+  margin: 0 6px;
+}
+.stats-bar .stat-label{
+  font-size: 12px;
+  opacity: 0.8;
+  font-weight: 600;
+}
+
+/* --- Pretty buttons --- */
+.btn {
+  --bg1: #1f2b6f;
+  --bg2: #2c3da0;
+  --bd: #3a4a90;
+  --fg: #eef2ff;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--bd);
+  background: linear-gradient(180deg, var(--bg1), var(--bg2));
+  color: var(--fg);
+  cursor: pointer;
+  font-weight: 600;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, .25), inset 0 1px 0 rgba(255, 255, 255, .06);
+  transition: transform .05s ease, filter .15s ease, opacity .15s ease;
+}
+
+.btn:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+  filter: brightness(0.97);
+}
+
+.btn:disabled,
+.btn.btn-disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  filter: grayscale(.3);
+}
+
+.btn-primary {
+  --bg1: #2343a0;
+  --bg2: #1a2f78;
+  --bd: #294aa8;
+}
+
+.btn-success {
+  --bg1: #1e7b50;
+  --bg2: #155a3a;
+  --bd: #1f8a58;
+}
+
+.btn-accent {
+  --bg1: #8a3ad1;
+  --bg2: #6428a0;
+  --bd: #8f56d6;
+}
+
+.btn-ghost {
+  --bg1: #121a36;
+  --bg2: #0e1428;
+  --bd: #2a355f;
+  color: #cfe4ff;
+}
+
+/* --- Ready badges --- */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  margin-left: 8px;
+}
+
+.badge-ready {
+  background: #1e6a3f;
+  color: #c6f7d2;
+  border-color: #2aa05e;
+}
+
+.badge-wait {
+  background: #6a1e3e;
+  color: #ffd8e4;
+  border-color: #b03a66;
+}
+
+.badge-turn {
+  background: #1e3e6a;
+  color: #cfe4ff;
+  border-color: #2a6aa0;
+}
+
+#mahjongTable {
+  position: relative;
+}
+
+/* ドラ帯 */
+.dora-ribbon {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, .78);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .16), inset 0 0 0 1px rgba(0, 0, 0, .08);
+  max-width: 88%;
+  pointer-events: none;
+  /* クリックは牌に通さない */
+}
+
+.dora-tag {
+  font: 700 12px/1 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+  color: #0f172a;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  background: rgba(15, 23, 42, .06);
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.dora-tiles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* 行間 */
+  overflow: visible;
+  mask-image: none;
+}
+
+/* 各行（横並び、中央寄せ、グループ間に少し広めの余白） */
+.dora-row {
+  display: flex;
+  flex-wrap: nowrap;
+  /* グループは折らない */
+  justify-content: center;
+  gap: 10px;
+  /* ← 数字グループの間隔（“少しだけ”） */
+}
+
+/* 1つのグループ（同じ数字 or 役牌のまとまり）の中の牌間隔 */
+.dora-group {
+  display: flex;
+  gap: 6px;
+  /* ← タイル間の通常間隔 */
+}
+
+/* 念のため重なり防止 */
+.dora-ribbon {
+  z-index: 50;
+}
+
+/* 牌は小さめで統一（画像アセットレンダラ互換） */
+.dora-tiles .tile-img {
+  height: 36px !important;
+  width: auto;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .25));
+}
+
+.wall-counter {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .75);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18), inset 0 0 0 1px rgba(0, 0, 0, .08);
+  font: 800 40px/1 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+  color: #0f172a;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mahjong-table.playing .wall-counter {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  transition: 150ms opacity, 120ms transform;
+}
+
+.mahjong-table .wall-counter {
+  opacity: .9;
+}
+
+.wall-counter::after {
+  content: "残り";
+  position: absolute;
+  bottom: 8px;
+  font-weight: 600;
+  font-size: 12px;
+  color: #475569;
+}
+
+/* 減った時のプチ演出（任意） */
+.wall-counter.pulse {
+  animation: pulse .24s ease-out;
+}
+
+@keyframes pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1.00);
+  }
+
+  50% {
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+
+  100% {
+    transform: translate(-50%, -50%) scale(1.00);
+  }
+}
+
+#mahjongTable .wall-counter {
+  opacity: 0;
+}
+
+/* ドラ帯は2行構成＆牌を大きく（高さ64px） */
+#doraRibbon .dora-tiles {
+  display: flex !important;
+  flex-direction: column !important;
+  /* ← 2行用の縦フレックス */
+  gap: 6px !important;
+  /* 行間 */
+  overflow: visible;
+  transform-origin: top center;
+}
+
+#doraRibbon .dora-row {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  /* グループは折り返さない */
+  justify-content: center !important;
+  gap: 12px !important;
+  /* 数字グループ同士の間隔 */
+}
+
+#doraRibbon .dora-group {
+  display: flex !important;
+  gap: 1px !important;
+  /* 同じ数字の中の間隔 */
+}
+
+#doraRibbon .tile-img {
+  height: 42px !important;
+  width: auto;
+}
+
+#doraRibbon svg {
+  height: 42px !important;
+  width: auto !important;
+}
+
+#doraRibbon .tile-fallback {
+  height: 42px !important;
+  width: 42px !important;
+}
+
+/* 2行前提の骨組み（グループ改行はしない） */
+#doraRibbon .dora-tiles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: visible;
+}
+
+#doraRibbon .dora-row {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  gap: 12px;
+}
+
+#doraRibbon .dora-group {
+  display: flex;
+  gap: 8px;
+}
+
+#doraRibbon {
+  position: absolute;
+  /* 既存どおり */
+  left: 50%;
+  top: calc(50% - 210px - 16px);
+  /* ← ここがポイント */
+  transform: translateX(-50%);
+  /* 水平ど真ん中 */
+  z-index: 45;
+  /* 対面の手牌より前面に（必要なら調整） */
+}
+
+/* 対局中に actionBar を消す既存ルールを打ち消す */
+body.game-playing #actionBar {
+  display: flex !important;
+}
+
+/* 下家ブロックを行レイアウトに（ラッパーをJSで作る） */
+#bottomRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+/* 既存の「画面下に絶対配置」スタイルを無効化して横並びへ */
+#actionBar {
+  position: static !important;
+  left: auto !important;
+  bottom: auto !important;
+  transform: none !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  z-index: auto !important;
+}
+
+#actionBar .btn {
+  min-width: 72px;
+}
+
+/* 手牌を左寄せ（右側に牌が足されていく見た目に） */
+#bottomRow #bottomHand {
+  justify-content: flex-start !important;
+}
+
+/* 「対局中はボタン非表示」等の旧ルールが他にあっても上書きできるように */
+#btnDraw,
+#btnStay {
+  display: inline-flex !important;
+}
