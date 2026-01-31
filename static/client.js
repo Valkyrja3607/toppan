@@ -99,6 +99,22 @@
     DOM_READY = true;
     cacheUI();
 
+    // ---- Auto scale to fit viewport ----
+    const root = document.documentElement;
+    const computeScale = () => {
+      const styles = getComputedStyle(root);
+      const designW = parseFloat(styles.getPropertyValue("--ui-design-w")) || 1600;
+      const designH = parseFloat(styles.getPropertyValue("--ui-design-h")) || 1000;
+      const vw = window.visualViewport?.width || window.innerWidth;
+      const vh = window.visualViewport?.height || window.innerHeight;
+      const scale = Math.min(vw / designW, vh / designH);
+      root.style.setProperty("--ui-scale", String(scale));
+    };
+    computeScale();
+    window.addEventListener("resize", () => window.requestAnimationFrame(computeScale));
+    window.addEventListener("orientationchange", () => window.requestAnimationFrame(computeScale));
+    window.visualViewport?.addEventListener("resize", () => window.requestAnimationFrame(computeScale));
+
     // ---- 下家の手牌とボタンを横並びにするラッパーを作成 ----
     const bottomSeatEl = document.getElementById("bottomSeat");
     if (bottomSeatEl && UI.bottomHand && UI.actionBar) {
