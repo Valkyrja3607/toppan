@@ -787,13 +787,20 @@ def _end_round(room: Room) -> None:
             continue
         child_sum = hand_total(p.hand)
         child_breakdown = role_breakdown(p.hand, room.state.dora_displays)
-        if is_special_role(p.hand):
+        if is_special_role(dealer.hand):
+            result_value = -dealer_role
+        elif len(dealer.hand) >= 5 and dealer_sum <= TARGET:
+            result_value = -dealer_role
+        elif len(p.hand) >= 5 and child_sum <= TARGET:
+            # 5枚以上引いてバーストしていなければ優先勝ち
+            result_value = child_breakdown["total"]
+        elif is_special_role(p.hand):
             result_value = child_breakdown["total"]
         # バーストは即負け。親がバーストなら子が10.5以下なら勝ち
-        elif child_sum > TARGET and not is_tsumo(p.hand):
-            result_value = -dealer_role
         elif dealer_sum > TARGET and not is_tsumo(dealer.hand):
             result_value = child_breakdown["total"]
+        elif child_sum > TARGET and not is_tsumo(p.hand):
+            result_value = -dealer_role
         else:
             if abs(TARGET - child_sum) < abs(TARGET - dealer_sum):
                 result_value = child_breakdown["total"]
