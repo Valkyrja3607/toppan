@@ -9,6 +9,8 @@
   let TileRenderer = null;
   let socket = null;
   const SE = {};
+  let seVolume = 0.8;
+  const SE_GAIN_SCALE = 0.01; // 体感を下げるための全体ゲイン
 
   // game-local states
   let lastState = null;
@@ -60,6 +62,7 @@
 
     UI.btnCreate = $("#btnCreate");
     UI.btnJoin = $("#btnJoin");
+    UI.btnLeave = $("#btnLeave");
     UI.btnReady = $("#btnReady");
     UI.btnUnready = $("#btnUnready");
     UI.btnStart = $("#btnStart");
@@ -83,8 +86,12 @@
 
     UI.startPoints = $("#startPoints");
     UI.betPoints = $("#betPoints");
+    UI.addPoints = $("#addPoints");
+    UI.btnAddPoints = $("#btnAddPoints");
     UI.cutinOverlay = $("#cutinOverlay");
     UI.cutinText = $("#cutinText");
+    UI.volumeRange = $("#volumeRange");
+    UI.volumeValue = $("#volumeValue");
   }
 
   function ensureUIReady() {
@@ -104,9 +111,17 @@
     try {
       const a = base.cloneNode();
       a.currentTime = 0;
+      a.volume = Math.max(0, Math.min(1, seVolume * SE_GAIN_SCALE));
       const p = a.play();
       if (p && typeof p.catch === "function") p.catch(() => {});
     } catch (_) {}
+  }
+
+  function applySeVolume(v) {
+    seVolume = Math.max(0, Math.min(1, v));
+    const effective = Math.max(0, Math.min(1, seVolume * SE_GAIN_SCALE));
+    Object.values(SE).forEach((a) => { if (a) a.volume = effective; });
+    if (UI.volumeValue) UI.volumeValue.textContent = `${Math.round(seVolume * 100)}%`;
   }
 
   // ---- Socket + App bootstrap after DOM ready ----
@@ -229,6 +244,33 @@
       });
     });
 
+    // ---- 飛び時の点数追加 ----
+    if (!UI.addPoints) {
+      UI.addPoints = document.createElement("input");
+      UI.addPoints.type = "number";
+      UI.addPoints.id = "addPoints";
+      UI.addPoints.placeholder = "追加点数";
+      UI.addPoints.value = "100";
+      UI.addPoints.min = "1";
+      UI.addPoints.step = "10";
+      UI.addPoints.className = "pts-input hidden";
+      UI.actionBar?.appendChild(UI.addPoints);
+    }
+    if (!UI.btnAddPoints) {
+      UI.btnAddPoints = document.createElement("button");
+      UI.btnAddPoints.id = "btnAddPoints";
+      UI.btnAddPoints.className = "btn btn-accent hidden";
+      UI.btnAddPoints.textContent = "点数追加";
+      UI.actionBar?.appendChild(UI.btnAddPoints);
+    }
+    UI.btnAddPoints?.addEventListener("click", () => {
+      const v = parseInt(UI.addPoints?.value ?? "", 10);
+      const points = Number.isFinite(v) ? v : 0;
+      socket.emit("add_points", { points }, (ack) => {
+        if (!ack?.ok) info(ack?.error || "点数追加エラー");
+      });
+    });
+
     // Load SVG tile renderer (safe even if missing)
     try {
       TileRenderer = await import("./tile_renderer.js?v=20250831-5");
@@ -248,6 +290,14 @@
     SE.normal.preload = "auto";
     SE.special1.preload = "auto";
     SE.special2.preload = "auto";
+    applySeVolume(seVolume);
+    if (UI.volumeRange) {
+      UI.volumeRange.value = String(Math.round(seVolume * 100));
+      UI.volumeRange.addEventListener("input", () => {
+        const n = parseInt(UI.volumeRange.value, 10);
+        applySeVolume((Number.isFinite(n) ? n : 80) / 100);
+      });
+    }
 
     // Init socket
     socket = io("/", { path: "/socket.io", transports: ["websocket", "polling"] });
@@ -319,6 +369,17 @@
         if (!ack?.ok) return info(ack?.error || "エラー");
         UI.tableEl?.classList.remove("hidden");
         info(`ルーム参加: ${rid}`);
+      });
+    };
+
+    if (UI.btnLeave) UI.btnLeave.onclick = () => {
+      socket.emit("leave_room", {}, (ack) => {
+        if (!ack?.ok) return info(ack?.error || "退出エラー");
+        UI.tableEl?.classList.add("hidden");
+        if (UI.roomId) UI.roomId.value = "";
+        mySeat = null;
+        lastState = null;
+        info("ルームから退出しました");
       });
     };
 
@@ -556,6 +617,10 @@
       b.disabled = !canAct;
       b.classList.toggle("btn-disabled", !canAct);
     });
+
+    const canAddPoints = !!my && (my.points ?? 0) <= 0;
+    if (UI.addPoints) UI.addPoints.classList.toggle("hidden", !canAddPoints);
+    if (UI.btnAddPoints) UI.btnAddPoints.classList.toggle("hidden", !canAddPoints);
   }
 
   function drawRiver(container, tiles) {

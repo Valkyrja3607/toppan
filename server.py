@@ -236,7 +236,7 @@ class RoomManager:
     def get_room(self, room_id: str) -> Optional[Room]:
         return self.rooms.get(room_id)
 
-    async def remove_player(self, sid: str) -> None:
+    async def remove_player(self, sid: str) -> Optional[Room]:
         # Remove a player from any room they are in; if room empties, delete it
         for rid, room in list(self.rooms.items()):
             if sid in room.players_by_sid:
@@ -252,7 +252,9 @@ class RoomManager:
                     # If empty, delete room
                     if not room.players_by_sid:
                         del self.rooms[rid]
-                break
+                        return None
+                return room
+        return None
 
 manager = RoomManager()
 
@@ -549,7 +551,9 @@ async def connect(sid, environ, auth):
 
 @sio.event
 async def disconnect(sid):
-    await manager.remove_player(sid)
+    room = await manager.remove_player(sid)
+    if room:
+        await emit_room_state(room)
 
 @sio.event
 async def create_room(sid, data):
@@ -643,6 +647,33 @@ async def set_initial_points(sid, data):
             p.bet_points = max(0, min(p.bet_points, pts))
     await emit_room_state(room)
     return {"ok": True}
+
+
+@sio.event
+async def add_points(sid, data):
+    """飛び(0以下)時に自分の点数を追加する。data: {"points": int}"""
+    add = (data or {}).get("points")
+    try:
+        add = int(add)
+    except Exception:
+        return {"ok": False, "error": "invalid points"}
+    if add <= 0 or add > 1_000_000:
+        return {"ok": False, "error": "points out of range"}
+
+    session = await sio.get_session(sid)
+    room = manager.get_room(session.get("room_id", "")) if session else None
+    if not room:
+        return {"ok": False, "error": "Not in a room"}
+
+    async with room.lock:
+        p = room.players_by_sid.get(sid)
+        if not p:
+            return {"ok": False, "error": "Player not found"}
+        if (p.points or 0) > 0:
+            return {"ok": False, "error": "Only available when points are 0 or less"}
+        p.points = (p.points or 0) + add
+    await emit_room_state(room)
+    return {"ok": True, "points": p.points}
 
 
 def _tile_sort_key(label: str) -> tuple:
@@ -1036,6 +1067,26 @@ async def chat(sid, data):
         "message": msg
     }
     await sio.emit("chat", payload, room=room_id)
+    return {"ok": True}
+
+
+@sio.event
+async def leave_room(sid, data):
+    """Leave current room explicitly."""
+    session = await sio.get_session(sid)
+    room_id = session.get("room_id") if session else None
+    room = await manager.remove_player(sid)
+    if room_id:
+        try:
+            await sio.leave_room(sid, room_id)
+        except Exception:
+            pass
+    try:
+        await sio.save_session(sid, {"room_id": None})
+    except Exception:
+        pass
+    if room:
+        await emit_room_state(room)
     return {"ok": True}
 
 # -------------- Minimal REST helper (optional create-room) --------------

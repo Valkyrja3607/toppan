@@ -125,6 +125,24 @@ main {
   100% { transform: scale(1.00); opacity: 1; }
 }
 
+.volume-panel{
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1200;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 12px;
+}
+.volume-panel input[type="range"]{
+  width: 120px;
+}
+
 /* Felt table */
 .mahjong-table {
   position: relative;

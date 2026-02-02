@@ -19,6 +19,7 @@
         <input id="roomId" placeholder="ルームID (例: ABC123)" />
         <button id="btnCreate">ルーム作成</button>
         <button id="btnJoin">参加</button>
+        <button id="btnLeave">退出</button>
       </div>
       <div id="status"></div>
     </header>
@@ -94,6 +95,11 @@
         </div>
       </aside>
     </main>
+    <div id="volumePanel" class="volume-panel">
+      <label for="volumeRange">音量</label>
+      <input id="volumeRange" type="range" min="0" max="100" step="1" value="80" />
+      <span id="volumeValue">80%</span>
+    </div>
   </div>
   <div id="cutinOverlay" class="cutin-overlay hidden" aria-live="polite">
     <div id="cutinText" class="cutin-text"></div>
@@ -101,7 +107,7 @@
 
   <link rel="stylesheet" href="style.css?v=20260202-2" />
   <script type="module" src="tile_renderer.js?v=20250831-5"></script>
-  <script src="client.js?v=20260202-4"></script>
+  <script src="client.js?v=20260202-7"></script>
 </body>
 
 </html>
