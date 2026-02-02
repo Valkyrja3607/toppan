@@ -101,6 +101,29 @@ main {
   color: #bfe2ff;
   font-style: italic;
 }
+.cutin-overlay{
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(255, 219, 128, 0.18) 0%, rgba(8, 15, 31, 0.9) 65%);
+  pointer-events: none;
+}
+.cutin-text{
+  font-size: 76px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  color: #ffe9a9;
+  text-shadow: 0 0 14px rgba(255, 209, 102, 0.8), 0 0 36px rgba(255, 209, 102, 0.4);
+  animation: cutin-pop 700ms ease-out both;
+}
+@keyframes cutin-pop {
+  0%   { transform: scale(0.82); opacity: 0; filter: blur(10px); }
+  25%  { transform: scale(1.12); opacity: 1; filter: blur(0); }
+  100% { transform: scale(1.00); opacity: 1; }
+}
 
 /* Felt table */
 .mahjong-table {

@@ -8,12 +8,14 @@
   let PENDING_STATES = [];
   let TileRenderer = null;
   let socket = null;
+  const SE = {};
 
   // game-local states
   let lastState = null;
   let lastPhase = null;
   let lastBetSent = null;
   let betConfirmedRound = false;
+  let lastCutinSignature = null;
   let mySeat = null;
   let seats = ["東", "南", "西", "北"];
 
@@ -81,6 +83,8 @@
 
     UI.startPoints = $("#startPoints");
     UI.betPoints = $("#betPoints");
+    UI.cutinOverlay = $("#cutinOverlay");
+    UI.cutinText = $("#cutinText");
   }
 
   function ensureUIReady() {
@@ -92,6 +96,17 @@
   function info(msg) {
     if (UI.status) UI.status.textContent = msg;
     else console.log("[status]", msg);
+  }
+
+  function playSe(key) {
+    const base = SE[key];
+    if (!base) return;
+    try {
+      const a = base.cloneNode();
+      a.currentTime = 0;
+      const p = a.play();
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch (_) {}
   }
 
   // ---- Socket + App bootstrap after DOM ready ----
@@ -108,7 +123,11 @@
       const vw = window.visualViewport?.width || window.innerWidth;
       const vh = window.visualViewport?.height || window.innerHeight;
       const scale = Math.min(vw / designW, vh / designH);
+      const offsetX = Math.max(0, (vw - designW * scale) / 2);
+      const offsetY = Math.max(0, (vh - designH * scale) / 2);
       root.style.setProperty("--ui-scale", String(scale));
+      root.style.setProperty("--ui-offset-x", `${offsetX}px`);
+      root.style.setProperty("--ui-offset-y", `${offsetY}px`);
     };
     computeScale();
     window.addEventListener("resize", () => window.requestAnimationFrame(computeScale));
@@ -201,6 +220,7 @@
     UI.resetYes?.addEventListener("click", () => {
       socket.emit("dealer_reset", { reset: true }, (ack) => {
         if (!ack?.ok) info(ack?.error || "リセットエラー");
+        else playSe("reset");
       });
     });
     UI.resetNo?.addEventListener("click", () => {
@@ -216,6 +236,18 @@
     } catch (e) {
       console.warn("[tile] failed to load renderer", e);
     }
+
+    // SE preload
+    SE.tsumo = new Audio("./assets/se/tsumo.wav");
+    SE.reset = new Audio("./assets/se/reset.wav");
+    SE.normal = new Audio("./assets/se/normal.wav");
+    SE.special1 = new Audio("./assets/se/special1.wav");
+    SE.special2 = new Audio("./assets/se/special2.wav");
+    SE.tsumo.preload = "auto";
+    SE.reset.preload = "auto";
+    SE.normal.preload = "auto";
+    SE.special1.preload = "auto";
+    SE.special2.preload = "auto";
 
     // Init socket
     socket = io("/", { path: "/socket.io", transports: ["websocket", "polling"] });
@@ -243,6 +275,17 @@
         const q = PENDING_STATES.slice();
         PENDING_STATES.length = 0;
         q.forEach(safeRender);
+      }
+      const cutin = state.cutin;
+      if (cutin?.label) {
+        const sig = String(cutin.sig || `${cutin.seat}:${cutin.label}`);
+        if (sig !== lastCutinSignature) {
+          lastCutinSignature = sig;
+          playSe(cutin.sound || "normal");
+          showCutin(cutin.label, 900);
+        }
+      } else if (state.phase !== "ended") {
+        lastCutinSignature = null;
       }
       if (ensureUIReady()) safeRender(state);
       else PENDING_STATES.push(state);
@@ -297,6 +340,7 @@
     if (UI.btnDraw) UI.btnDraw.onclick = () =>
       socket.emit("draw_tile", {}, (ack) => {
         if (!ack?.ok) info(ack?.error || "ツモエラー");
+        else playSe("tsumo");
       });
 
     if (!UI.btnStay) {
@@ -332,6 +376,13 @@
   // ---- Rendering ----
   function safeRender(state) {
     try { render(state); } catch (e) { console.error("[render error]", e); }
+  }
+
+  function showCutin(label, ms = 900) {
+    if (!UI.cutinOverlay || !UI.cutinText) return;
+    UI.cutinText.textContent = label;
+    UI.cutinOverlay.classList.remove("hidden");
+    setTimeout(() => UI.cutinOverlay?.classList.add("hidden"), ms);
   }
 
   function render(state) {

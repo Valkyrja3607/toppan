@@ -154,6 +154,25 @@ def is_special_role(hand) -> bool:
         return True
     return False
 
+def special_role_cutin(hand: List[str]) -> Optional[dict]:
+    if not is_special_role(hand):
+        return None
+    toppan = is_toppan(hand)
+    tsumo = is_tsumo(hand)
+    many = len(hand) >= 5 and hand_total(hand) <= TARGET
+
+    if toppan and many:
+        return {"label": "十半", "sound": "special1"}
+    if toppan and tsumo:
+        return {"label": "十半", "sound": "special2"}
+    if toppan:
+        return {"label": "十半", "sound": "normal"}
+    if tsumo:
+        return {"label": "ツモ", "sound": "normal"}
+    if many:
+        return {"label": f"{len(hand)}枚引き", "sound": "normal"}
+    return None
+
 
 @dataclass
 class Player:
@@ -178,6 +197,7 @@ class GameState:
     dealer_first_hidden: bool = True    # 親の1枚目を伏せる
     dora_displays: List[str] = field(default_factory=list)  # 参考表示用
     results: Dict[int, str] = field(default_factory=dict)   # seat_index -> "win"/"lose"/"push"
+    cutin: Optional[dict] = None
 
 @dataclass
 class Room:
@@ -276,6 +296,7 @@ async def emit_settlement_to_chat(room: Room, results: dict) -> None:
     dealer_name = dealer.name if dealer else "親"
 
     pairs = results.get("pairs", {})
+    is_void = results.get("reason") == "wall_empty_void"
     for seat, r in pairs.items():
         child_sid = room.seat_to_sid.get(seat)
         child = room.players_by_sid.get(child_sid) if child_sid else None
@@ -291,7 +312,13 @@ async def emit_settlement_to_chat(room: Room, results: dict) -> None:
         else:
             line1 = f"{child_name}->{dealer_name}: 0"
 
-        lines = [line1, f"bet額: {int(r.get('bet', 0))}"]
+        lines = [line1]
+        if is_void:
+            lines.append("流局（山切れ）: 親が子へ100支払い")
+            await sio.emit("chat", {"system": True, "message": "\n".join(lines)}, room=room.room_id)
+            continue
+
+        lines.append(f"bet額: {int(r.get('bet', 0))}")
         # 勝者側の役内訳を表示（引き分け時は子→親の順で両方見る）
         if delta > 0:
             role_items = r.get("child_roles", [])
@@ -341,6 +368,7 @@ async def emit_state_to_sid(room: Room, sid: str) -> None:
         "results": getattr(st, "results", {}),
         "dealer_seat": st.dealer_seat,
         "dealer_first_hidden": st.dealer_first_hidden,
+        "cutin": getattr(st, "cutin", None),
         "you_seat": you_seat,
     }
     await sio.emit("state", payload, to=sid)
@@ -413,6 +441,7 @@ def _prepare_betting_phase(room: Room) -> None:
     st.turn_seat = None
     st.dealer_first_hidden = True
     st.results = {}
+    st.cutin = None
 
 def _maybe_finish_round(room: Room) -> None:
     st = room.state
@@ -507,7 +536,8 @@ def _start_next_round_locked(room: Room) -> None:
         dealer_seat=st.dealer_seat,
         dealer_first_hidden=True,
         dora_displays=getattr(st, "dora_displays", []),
-        results={}
+        results={},
+        cutin=None
     )
 
 # ---------------------- Socket.IO Event Handlers ----------------------
@@ -673,7 +703,8 @@ async def start_game(sid, data):
             dealer_seat=0,
             dealer_first_hidden=True,
             dora_displays=dora,
-            results={}
+            results={},
+            cutin=None
         )
     await emit_room_state(room)
     return {"ok": True}
@@ -769,8 +800,57 @@ def _next_seated_seat(room: Room, from_seat: int) -> Optional[int]:
 def _all_done(room: Room) -> bool:
     return all(p.status != "playing" for p in room.players())
 
+def _void_round_by_empty_wall(room: Room) -> None:
+    """山切れ時はラウンド無効。親が各子に100支払う。"""
+    st = room.state
+    st.cutin = None
+    st.dealer_first_hidden = False
+    current_dealer_seat = st.dealer_seat
+    dealer_sid = room.seat_to_sid.get(current_dealer_seat)
+    dealer = room.players_by_sid.get(dealer_sid) if dealer_sid else None
+    if not dealer:
+        st.phase = "ended"
+        st.turn_seat = None
+        return
+
+    results = {}
+    dealer_delta = 0
+    for p in room.players():
+        if p.seat_index == current_dealer_seat:
+            continue
+        delta = 100
+        p.points = (p.points or 0) + delta
+        dealer_delta -= delta
+        results[p.seat_index] = {
+            "result": 0,
+            "bet": int(p.bet_points or 0),
+            "delta": delta,
+            "child_total": hand_total(p.hand),
+            "dealer_total": hand_total(dealer.hand),
+            "child_roles": [],
+            "child_role_total": 0,
+            "dealer_roles": [],
+            "dealer_role_total": 0,
+        }
+
+    dealer.points = (dealer.points or 0) + dealer_delta
+    for p in room.players():
+        if p.seat_index != current_dealer_seat:
+            p.bet_points = None
+    st.results = {
+        "dealer_seat": current_dealer_seat,
+        "dealer_delta": dealer_delta,
+        "pairs": results,
+        "reason": "wall_empty_void",
+    }
+    st.phase = "ended"
+    st.turn_seat = None
+    asyncio.create_task(auto_next_round(room.room_id))
+    asyncio.create_task(emit_settlement_to_chat(room, st.results))
+
 def _end_round(room: Room) -> None:
     st = room.state
+    st.cutin = None
     st.dealer_first_hidden = False  # 親の伏せ札を公開
     # 親・子それぞれの合計
     current_dealer_seat = st.dealer_seat
@@ -863,12 +943,19 @@ async def draw_tile(sid, data):
         if p.status != "playing":
             return {"ok": False, "error": "You are not in playing state"}
         if not st.wall:
-            _end_round(room)
+            _void_round_by_empty_wall(room)
             await emit_room_state(room)
             return {"ok": False, "error": "Wall empty. Round ended."}
         # 引く
         tile = st.wall.pop()
         p.hand.append(tile)
+        cutin = special_role_cutin(p.hand)
+        if cutin:
+            label = cutin["label"]
+            sound = cutin.get("sound", "normal")
+            st.cutin = {"seat": p.seat_index, "label": label, "sound": sound, "sig": f"{p.seat_index}:{len(p.hand)}:{label}:{sound}"}
+        else:
+            st.cutin = None
         # バースト判定
         if hand_total(p.hand) > TARGET and not is_special_role(p.hand):
             p.status = "bust"
