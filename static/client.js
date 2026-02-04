@@ -10,7 +10,7 @@
   let socket = null;
   const SE = {};
   let seVolume = 0.8;
-  const SE_GAIN_SCALE = 0.01; // 体感を下げるための全体ゲイン
+  const SE_GAIN_SCALE = 0.015; // 体感を下げるための全体ゲイン
 
   // game-local states
   let lastState = null;
@@ -18,6 +18,9 @@
   let lastBetSent = null;
   let betConfirmedRound = false;
   let lastCutinSignature = null;
+  let lastWallCountForSe = null;
+  let lastDoraSigForSe = null;
+  let lastPhaseForSe = null;
   let mySeat = null;
   let seats = ["東", "南", "西", "北"];
 
@@ -111,7 +114,7 @@
     try {
       const a = base.cloneNode();
       a.currentTime = 0;
-      a.volume = Math.max(0, Math.min(1, seVolume * SE_GAIN_SCALE));
+      a.volume = (key === "tsumo" || key === "reset") ? Math.max(0, Math.min(1, seVolume*0.5)) : Math.max(0, Math.min(1, seVolume * SE_GAIN_SCALE));;
       const p = a.play();
       if (p && typeof p.catch === "function") p.catch(() => {});
     } catch (_) {}
@@ -235,7 +238,6 @@
     UI.resetYes?.addEventListener("click", () => {
       socket.emit("dealer_reset", { reset: true }, (ack) => {
         if (!ack?.ok) info(ack?.error || "リセットエラー");
-        else playSe("reset");
       });
     });
     UI.resetNo?.addEventListener("click", () => {
@@ -309,6 +311,29 @@
     socket.on("state", (state) => {
       lastState = state;
       seats = state.seats || seats;
+      const doraSig = JSON.stringify(state.dora_displays || []);
+
+      // 他家含むツモSE（山枚数が減ったら鳴らす）
+      if (
+        lastWallCountForSe != null &&
+        state.phase === "playing" &&
+        typeof state.wall_count === "number" &&
+        state.wall_count < lastWallCountForSe
+      ) {
+        playSe("tsumo");
+      }
+
+      // 親が山リセットした時のSE（reset_prompt -> betting かつ 山/ドラ更新）
+      if (
+        lastPhaseForSe === "reset_prompt" &&
+        state.phase === "betting" &&
+        (
+          (lastDoraSigForSe != null && doraSig !== lastDoraSigForSe) ||
+          (lastWallCountForSe != null && typeof state.wall_count === "number" && state.wall_count > lastWallCountForSe)
+        )
+      ) {
+        playSe("reset");
+      }
       // --- 自席は初回だけ確定（以後は固定して上書きしない）---
       if (typeof mySeat !== "number") {
         if (typeof state.you_seat === "number") {
@@ -339,6 +364,10 @@
       }
       if (ensureUIReady()) safeRender(state);
       else PENDING_STATES.push(state);
+
+      lastWallCountForSe = (typeof state.wall_count === "number") ? state.wall_count : lastWallCountForSe;
+      lastDoraSigForSe = doraSig;
+      lastPhaseForSe = state.phase;
     });
 
     socket.on("chat", (p) => {
@@ -379,6 +408,9 @@
         if (UI.roomId) UI.roomId.value = "";
         mySeat = null;
         lastState = null;
+        lastWallCountForSe = null;
+        lastDoraSigForSe = null;
+        lastPhaseForSe = null;
         info("ルームから退出しました");
       });
     };
@@ -401,7 +433,6 @@
     if (UI.btnDraw) UI.btnDraw.onclick = () =>
       socket.emit("draw_tile", {}, (ack) => {
         if (!ack?.ok) info(ack?.error || "ツモエラー");
-        else playSe("tsumo");
       });
 
     if (!UI.btnStay) {
