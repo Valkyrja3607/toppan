@@ -23,6 +23,7 @@
   let lastPhaseForSe = null;
   let mySeat = null;
   let seats = ["東", "南", "西", "北"];
+  let inFreeMatch = false;
 
   // UI cache
   const UI = {};
@@ -64,8 +65,10 @@
     UI.roomId = $("#roomId");
 
     UI.btnCreate = $("#btnCreate");
+    UI.btnQuick = $("#btnQuick");
     UI.btnJoin = $("#btnJoin");
     UI.btnLeave = $("#btnLeave");
+    UI.btnAddBot = $("#btnAddBot");
     UI.btnReady = $("#btnReady");
     UI.btnUnready = $("#btnUnready");
     UI.btnStart = $("#btnStart");
@@ -106,6 +109,16 @@
   function info(msg) {
     if (UI.status) UI.status.textContent = msg;
     else console.log("[status]", msg);
+  }
+
+  function setLobbyMode(mode) {
+    inFreeMatch = (mode === "free");
+    if (UI.roomId) UI.roomId.classList.toggle("hidden", inFreeMatch);
+    if (UI.btnCreate) UI.btnCreate.classList.toggle("hidden", inFreeMatch);
+    if (UI.btnJoin) UI.btnJoin.classList.toggle("hidden", inFreeMatch);
+    if (UI.btnQuick) UI.btnQuick.classList.toggle("hidden", inFreeMatch);
+    if (UI.btnAddBot) UI.btnAddBot.classList.toggle("hidden", inFreeMatch);
+    if (UI.btnLeave) UI.btnLeave.classList.toggle("hidden", !inFreeMatch);
   }
 
   function playSe(key) {
@@ -384,8 +397,21 @@
         console.log("[create_room ack]", ack);
         if (!ack?.ok) return info(ack?.error || "エラー");
         UI.tableEl?.classList.remove("hidden");
+        UI.btnAddBot?.classList.remove("hidden");
         if (UI.roomId) UI.roomId.value = ack.room_id;
         info(`ルーム作成: ${ack.room_id}`);
+      });
+    };
+
+    if (UI.btnQuick) UI.btnQuick.onclick = () => {
+      const name = (UI.playerName?.value || "Player");
+      socket.emit("free_match", { name }, (ack) => {
+        if (!ack?.ok) return info(ack?.error || "フリーマッチエラー");
+        UI.tableEl?.classList.remove("hidden");
+        UI.btnAddBot?.classList.remove("hidden");
+        if (UI.roomId) UI.roomId.value = "";
+        setLobbyMode("free");
+        info("フリーマッチ参加");
       });
     };
 
@@ -397,7 +423,15 @@
         console.log("[join_room ack]", ack);
         if (!ack?.ok) return info(ack?.error || "エラー");
         UI.tableEl?.classList.remove("hidden");
+        UI.btnAddBot?.classList.remove("hidden");
+        setLobbyMode("normal");
         info(`ルーム参加: ${rid}`);
+      });
+    };
+
+    if (UI.btnAddBot) UI.btnAddBot.onclick = () => {
+      socket.emit("add_bot", { name: "BOT" }, (ack) => {
+        if (!ack?.ok) info(ack?.error || "BOT追加エラー");
       });
     };
 
@@ -405,6 +439,7 @@
       socket.emit("leave_room", {}, (ack) => {
         if (!ack?.ok) return info(ack?.error || "退出エラー");
         UI.tableEl?.classList.add("hidden");
+        UI.btnAddBot?.classList.add("hidden");
         if (UI.roomId) UI.roomId.value = "";
         mySeat = null;
         lastState = null;
@@ -412,6 +447,7 @@
         lastDoraSigForSe = null;
         lastPhaseForSe = null;
         info("ルームから退出しました");
+        setLobbyMode("normal");
       });
     };
 
@@ -450,12 +486,8 @@
       };
     }
 
-    if (UI.btnChat) UI.btnChat.onclick = () => {
-      const m = (UI.chatMsg?.value || "").trim();
-      if (!m) return;
-      socket.emit("chat", { message: m });
-      if (UI.chatMsg) UI.chatMsg.value = "";
-    };
+    if (UI.chatMsg) UI.chatMsg.remove();
+    if (UI.btnChat) UI.btnChat.remove();
 
     // Flush any queued states (precaution)
     if (PENDING_STATES.length) {
@@ -560,6 +592,10 @@
     const isHost = (state.host === socket.id);
     const canStart = (phase === "waiting") && nPlayers >= 2 && isHost;
 
+    if (UI.btnAddBot) {
+      UI.btnAddBot.classList.toggle("hidden", !isHost);
+    }
+
     if (UI.btnStart) {
       UI.btnStart.disabled = !canStart;
       UI.btnStart.classList.toggle("btn-disabled", !canStart);
@@ -624,16 +660,26 @@
       if (riverEl) riverEl.innerHTML = "";
       if (!p || p.seat === mySeatEff) return;
 
+      const rotation = seatRotation(who);
+      if (handEl) {
+        handEl.classList.toggle("rotated-tiles", Math.abs(rotation) === 90);
+      }
       const hand = Array.isArray(p.hand) ? p.hand : [];
+      const addNode = (el, node) => {
+        if (!el || !node) return;
+        el.appendChild(node);
+      };
       hand.forEach((t) => {
+        let node = null;
         if (t === "🀫" || t === "BACK") {
-          handEl?.appendChild(backNode(true));
+          node = backNode(true);
         } else {
-          handEl?.appendChild(tileNode(t, true)); // ← 実牌を描画
+          node = tileNode(t, true); // ← 実牌を描画
         }
+        applyTileRotation(node, rotation, true);
+        addNode(handEl, node);
       });
-
-      drawRiver(riverEl, p.discards);
+      drawRiver(riverEl, p.discards, rotation);
     });
 
     // --- あなたが手番の時だけ「引く/ステイ」ボタンを有効化 ---
@@ -654,10 +700,15 @@
     if (UI.btnAddPoints) UI.btnAddPoints.classList.toggle("hidden", !canAddPoints);
   }
 
-  function drawRiver(container, tiles) {
+  function drawRiver(container, tiles, rotation = 0) {
     if (!container || !tiles) return;
     container.innerHTML = "";
-    tiles.forEach((t) => container.appendChild(tileNode(t, true)));
+    container.classList.toggle("rotated-tiles", Math.abs(rotation) === 90);
+    tiles.forEach((t) => {
+      const node = tileNode(t, true);
+      applyTileRotation(node, rotation, true);
+      container.appendChild(node);
+    });
   }
 
   // ---- Seat helpers ----
@@ -683,7 +734,17 @@
     if (UI.leftName)   UI.leftName.textContent   = ordered.left ? fmt(ordered.left, "") : (lastState?.seats?.[ordered.left?.seat ?? -1] ?? "");
     if (UI.topName)    UI.topName.textContent    = ordered.top ? fmt(ordered.top, "") : (lastState?.seats?.[ordered.top?.seat ?? -1] ?? "");
     if (UI.rightName)  UI.rightName.textContent  = ordered.right ? fmt(ordered.right, "") : (lastState?.seats?.[ordered.right?.seat ?? -1] ?? "");
-    if (UI.bottomName) UI.bottomName.textContent = ordered.me ? fmt(ordered.me, "") : (lastState?.seats?.[ordered.me?.seat ?? -1] ?? "");
+    if (UI.bottomName) {
+      if (ordered.me) {
+        const betText = (typeof ordered.me.bet === "number") ? `bet: ${ordered.me.bet}` : "bet: -";
+        UI.bottomName.innerHTML =
+          `<span class="profile-name">${ordered.me.name}</span>` +
+          `<span class="profile-points">${ordered.me.points ?? 0}pt</span>` +
+          `<span class="profile-bet">${betText}</span>`;
+      } else {
+        UI.bottomName.textContent = (lastState?.seats?.[ordered.me?.seat ?? -1] ?? "");
+      }
+    }
 
     // winds
     if (UI.leftSeatWind) UI.leftSeatWind.textContent = ordered.left ? (lastState?.seats[ordered.left.seat] ?? "") : "";
@@ -734,6 +795,43 @@
     d.className = "tile-fallback" + (small ? " small" : "");
     d.textContent = "🀫";
     return d;
+  }
+
+  // (removed) centerNewestTile: now grow downward for left/right hands
+
+  function seatRotation(who) {
+    switch (who) {
+      case "left":
+        return 90;
+      case "right":
+        return -90;
+      case "top":
+        return 180;
+      default:
+        return 0;
+    }
+  }
+
+  function applyTileRotation(el, deg = 0, small = false) {
+    if (!el) return;
+    const safeDeg = Number.isFinite(deg) ? deg : 0;
+    if (el.classList && !el.classList.contains("clickable")) {
+      el.classList.add("clickable");
+    }
+    el.style.setProperty("--tile-rot", `${safeDeg}deg`);
+    el.style.transformOrigin = "center";
+    el.style.transform = `scale(var(--tile-scale, 1)) rotate(${safeDeg}deg) translateY(var(--tile-ty, 0px))`;
+    if (Math.abs(safeDeg) === 90) {
+      el.classList.add("rotated-90");
+      const w = small ? 28 : 40;
+      const h = small ? 42 : 60;
+      el.style.width = w + "px";
+      el.style.height = h + "px";
+    } else {
+      el.classList.remove("rotated-90");
+      el.style.width = "";
+      el.style.height = "";
+    }
   }
 
 

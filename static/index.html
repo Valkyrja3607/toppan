@@ -18,7 +18,9 @@
         <input id="playerName" placeholder="名前 (例: YourName)" />
         <input id="roomId" placeholder="ルームID (例: ABC123)" />
         <button id="btnCreate">ルーム作成</button>
+        <button id="btnQuick">フリーマッチ</button>
         <button id="btnJoin">参加</button>
+        <button id="btnAddBot" class="hidden">BOT追加</button>
         <button id="btnLeave">退出</button>
       </div>
       <div id="status"></div>
@@ -86,12 +88,8 @@
 
       <aside id="sidebar">
         <div class="panel">
-          <h3>チャット</h3>
+          <h3>ログ</h3>
           <div id="chatLog" class="chat-log"></div>
-          <div class="chat-input">
-            <input id="chatMsg" placeholder="メッセージ..." />
-            <button id="btnChat">送信</button>
-          </div>
         </div>
       </aside>
     </main>
@@ -105,9 +103,9 @@
     <div id="cutinText" class="cutin-text"></div>
   </div>
 
-  <link rel="stylesheet" href="style.css?v=20260202-2" />
+  <link rel="stylesheet" href="style.css?v=20260202-3" />
   <script type="module" src="tile_renderer.js?v=20250831-5"></script>
-  <script src="client.js?v=20260202-8"></script>
+  <script src="client.js?v=20260202-11"></script>
 </body>
 
 </html>

@@ -93,6 +93,30 @@ def count_role(hand: list[str], dora: list[str]) -> float:
     return breakdown["total"]
 
 
+
+def count_dora(hand: list[str], dora: list[str]) -> int:
+    """ドラの合計を返す"""
+    dora_points = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, "東南西北": 0, "白發中": 0}
+    for card in dora:
+        if len(card) == 2:
+            dora_points[(int(card[0]) % 9) + 1] += 1
+        if card in {"東", "南", "西", "北"}:
+            dora_points["東南西北"] += 1
+        if card in {"白", "發", "中"}:
+            dora_points["白發中"] += 1
+
+    dora_total = 0
+    for card in hand:
+        if len(card) == 2:
+            dora_total += dora_points[int(card[0])]
+        if card in {"東", "南", "西", "北"}:
+            dora_total += dora_points["東南西北"]
+        if card in {"白", "發", "中"}:
+            dora_total += dora_points["白發中"]
+
+    return dora_total
+
+
 def role_breakdown(hand: list[str], dora: list[str]) -> dict:
     """役の内訳を返す: {total: int, items: [{name, points, multiplier}] }"""
     items = []
@@ -186,6 +210,7 @@ class Player:
     points: int = 300
     initial_points: Optional[int] = None  # ← 開始前に入力した持ち点（未入力は None）
     bet_points: Optional[int] = None   # ← このラウンドのベット（子のみ）
+    is_bot: bool = False
 
 @dataclass
 class GameState:
@@ -207,6 +232,8 @@ class Room:
     seat_to_sid: Dict[int, Optional[str]] = field(default_factory=lambda: {0: None, 1: None, 2: None, 3: None})
     state: GameState = field(default_factory=GameState)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    bot_running: bool = False
+    is_free_match: bool = False
 
     def seats_filled(self) -> int:
         return sum(1 for s in self.seat_to_sid.values() if s)
@@ -223,6 +250,7 @@ class RoomManager:
     def __init__(self) -> None:
         self.rooms: Dict[str, Room] = {}
         self._global_lock = asyncio.Lock()
+        self.free_room_id: Optional[str] = None
 
     async def create_room(self) -> Room:
         async with self._global_lock:
@@ -231,6 +259,20 @@ class RoomManager:
                 if rid not in self.rooms:
                     room = Room(room_id=rid)
                     self.rooms[rid] = room
+                    return room
+
+    async def get_free_room(self) -> Room:
+        async with self._global_lock:
+            room = self.rooms.get(self.free_room_id) if self.free_room_id else None
+            if room and room.seats_filled() < 4:
+                return room
+            # create new free room
+            while True:
+                rid = gen_room_id()
+                if rid not in self.rooms:
+                    room = Room(room_id=rid, is_free_match=True)
+                    self.rooms[rid] = room
+                    self.free_room_id = rid
                     return room
 
     def get_room(self, room_id: str) -> Optional[Room]:
@@ -249,8 +291,12 @@ class RoomManager:
                     if room.host_sid == sid:
                         sids = room.player_sids()
                         room.host_sid = sids[0] if sids else None
+                    if room.is_free_match:
+                        _sync_free_room_bots_locked(room)
                     # If empty, delete room
                     if not room.players_by_sid:
+                        if room.is_free_match and self.free_room_id == rid:
+                            self.free_room_id = None
                         del self.rooms[rid]
                         return None
                 return room
@@ -277,7 +323,9 @@ app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app)
 
 async def emit_room_state(room: Room) -> None:
     """Broadcast tailored state to each player (your hand vs. others' counts)."""
-    for sid in room.players_by_sid.keys():
+    for sid, p in room.players_by_sid.items():
+        if p.is_bot:
+            continue
         await emit_state_to_sid(room, sid)
 
 async def emit_player_list_to_chat(room: Room) -> None:
@@ -333,6 +381,33 @@ async def emit_settlement_to_chat(room: Room, results: dict) -> None:
 
         await sio.emit("chat", {"system": True, "message": "\n".join(lines)}, room=room.room_id)
 
+async def _force_leave_player(room_id: str, sid: str, reason: str) -> None:
+    room = manager.get_room(room_id)
+    if not room:
+        return
+    p = room.players_by_sid.get(sid)
+    name = p.name if p else sid[:4]
+    await sio.emit("chat", {"system": True, "message": f"{name}は点数0以下のため退室しました"}, room=room_id)
+    try:
+        await sio.leave_room(sid, room_id)
+    except Exception:
+        pass
+    try:
+        await sio.save_session(sid, {"room_id": None})
+    except Exception:
+        pass
+    room = await manager.remove_player(sid)
+    if room:
+        await emit_room_state(room)
+
+async def _kick_broke_players(room_id: str) -> None:
+    room = manager.get_room(room_id)
+    if not room:
+        return
+    broke = [sid for sid, p in room.players_by_sid.items() if (not p.is_bot) and (p.points or 0) <= 0]
+    for sid in broke:
+        await _force_leave_player(room_id, sid, "points_zero")
+
 def minimal_player_view(p: Player, is_you: bool, state: GameState) -> dict:
     hand_view = list(p.hand)
     # あなた以外に見せるとき、親の1枚目だけ伏せる
@@ -351,6 +426,193 @@ def minimal_player_view(p: Player, is_you: bool, state: GameState) -> dict:
         "initial_points": p.initial_points, # ← 参考（UIで未入力か判断したい時）
         "bet": p.bet_points,
     }
+
+def _sync_free_room_bots_locked(room: Room) -> None:
+    if not room.is_free_match:
+        return
+    humans = [p for p in room.players() if not p.is_bot]
+    bots = [p for p in room.players() if p.is_bot]
+    if len(humans) == 0 and len(bots) > 0:
+        for b in list(bots):
+            if room.seat_to_sid.get(b.seat_index) == b.sid:
+                room.seat_to_sid[b.seat_index] = None
+            room.players_by_sid.pop(b.sid, None)
+        return
+    if len(humans) == 1 and len(bots) == 0:
+        seat = first_open_seat(room.seat_to_sid)
+        if seat is None:
+            return
+        bot_sid = f"BOT-FREE-{room.room_id}-{seat}"
+        bot = Player(sid=bot_sid, name="BOT", seat_index=seat, is_bot=True)
+        room.players_by_sid[bot_sid] = bot
+        room.seat_to_sid[seat] = bot_sid
+    elif len(humans) >= 2 and len(bots) > 0:
+        for b in list(bots):
+            if room.seat_to_sid.get(b.seat_index) == b.sid:
+                room.seat_to_sid[b.seat_index] = None
+            room.players_by_sid.pop(b.sid, None)
+        if room.host_sid and room.host_sid not in room.players_by_sid:
+            sids = room.player_sids()
+            room.host_sid = sids[0] if sids else None
+
+def _bot_choose_bet(p: Player, dora: List[str]) -> int:
+    total = hand_total(p.hand)
+    if total > TARGET:
+        return 0
+    if is_special_role(p.hand):
+        return 10
+
+    # ドラ点数が高いほど高ベット
+    breakdown = role_breakdown(p.hand, dora or [])
+    dora_total = 0
+    for item in breakdown.get("items", []):
+        if item.get("name") == "ドラ":
+            dora_total = int(item.get("points", 0))
+            break
+
+    # 数字（合計）が低いほど高ベット、9以上は高め
+    low_bonus = {0.5: 5, 1: 4, 2: 2}.get(total, 0)
+    high_bonus = 4.5 if total >= 9.0 else 0.0
+
+    score = (dora_total / 2) + low_bonus + high_bonus
+    bet = int(round(score))
+    bet = max(1, min(10, bet))
+    available = p.initial_points if p.initial_points is not None else (p.points if p.points is not None else 300)
+    return max(1, min(bet, available))
+
+def _bot_should_draw(p: Player, dora: list[str]) -> bool:
+    if is_special_role(p.hand):
+        return False
+    total = hand_total(p.hand)
+    if total == 10:
+        if count_dora(p.hand, dora)<=5:
+            return True
+    if total >= 8:
+        return False
+    return total < TARGET
+
+def _draw_tile_for_player(room: Room, p: Player) -> Optional[str]:
+    st = room.state
+    if st.phase != "playing":
+        return "Not in playing phase"
+    if p.seat_index != st.turn_seat:
+        return "Not your turn"
+    if p.status != "playing":
+        return "You are not in playing state"
+    if not st.wall:
+        _void_round_by_empty_wall(room)
+        return "Wall empty. Round ended."
+    tile = st.wall.pop()
+    p.hand.append(tile)
+    cutin = special_role_cutin(p.hand)
+    if cutin:
+        label = cutin["label"]
+        sound = cutin.get("sound", "normal")
+        st.cutin = {"seat": p.seat_index, "label": label, "sound": sound, "sig": f"{p.seat_index}:{len(p.hand)}:{label}:{sound}"}
+    else:
+        st.cutin = None
+    if hand_total(p.hand) > TARGET and not is_special_role(p.hand):
+        p.status = "bust"
+        if p.seat_index == st.dealer_seat:
+            _end_round(room)
+        else:
+            nxt = _next_active_seat(room, st.turn_seat)
+            if nxt is None:
+                _end_round(room)
+            else:
+                st.turn_seat = nxt
+    return None
+
+def _stay_for_player(room: Room, p: Player) -> Optional[str]:
+    st = room.state
+    if st.phase != "playing":
+        return "Not in playing phase"
+    if p.seat_index != st.turn_seat:
+        return "Not your turn"
+    if p.status != "playing":
+        return "You are not in playing state"
+    p.status = "stay"
+    if p.seat_index == st.dealer_seat and is_special_role(p.hand):
+        _end_round(room)
+        return None
+    nxt = _next_active_seat(room, st.turn_seat)
+    if nxt is None:
+        _end_round(room)
+    else:
+        st.turn_seat = nxt
+    return None
+
+async def _bot_step_locked(room: Room) -> bool:
+    st = room.state
+    # 0以下のBOTは自動で300点補充
+    for p in room.players():
+        if p.is_bot and (p.points or 0) <= 0:
+            p.points = (p.points or 0) + 300
+
+    if st.phase == "reset_prompt":
+        dealer_sid = room.seat_to_sid.get(st.dealer_seat)
+        dealer = room.players_by_sid.get(dealer_sid) if dealer_sid else None
+        if dealer and dealer.is_bot:
+            required = INITIAL_HAND_SIZE * len(room.players())
+            need_reset = len(st.wall) < required or len(st.wall) <= 30
+            if need_reset:
+                wall = make_standard_tiles()
+                random.shuffle(wall)
+                dora = wall[: min(34, len(wall))]
+                st.wall = wall[min(34, len(wall)):]
+                st.dora_displays = dora
+            _prepare_betting_phase(room)
+            return True
+        return False
+
+    if st.phase == "betting":
+        acted = False
+        for p in room.players():
+            if not p.is_bot:
+                continue
+            if p.seat_index == st.dealer_seat:
+                continue
+            if p.bet_points is None:
+                p.bet_points = _bot_choose_bet(p, st.dora_displays)
+                acted = True
+        if acted and _all_children_bet(room):
+            _start_playing_phase(room)
+        return acted
+
+    if st.phase == "playing":
+        sid = room.seat_to_sid.get(st.turn_seat)
+        p = room.players_by_sid.get(sid) if sid else None
+        if p and p.is_bot and p.status == "playing":
+            if _bot_should_draw(p, st.dora_displays):
+                _draw_tile_for_player(room, p)
+            else:
+                _stay_for_player(room, p)
+            return True
+    return False
+
+async def _run_bots(room_id: str) -> None:
+    try:
+        while True:
+            room = manager.get_room(room_id)
+            if not room:
+                return
+            acted = False
+            async with room.lock:
+                acted = await _bot_step_locked(room)
+            if not acted:
+                return
+            await emit_room_state(room)
+            await asyncio.sleep(0.35)
+    finally:
+        room = manager.get_room(room_id)
+        if room:
+            room.bot_running = False
+
+def _schedule_bots(room: Room) -> None:
+    if room.bot_running:
+        return
+    room.bot_running = True
+    asyncio.create_task(_run_bots(room.room_id))
 
 async def emit_state_to_sid(room: Room, sid: str) -> None:
     you_p = room.players_by_sid.get(sid)
@@ -526,6 +788,7 @@ async def auto_next_round(room_id: str):
             return
         _start_next_round_locked(room)
     await emit_room_state(room)
+    _schedule_bots(room)
 
 def _start_next_round_locked(room: Room) -> None:
     st = room.state
@@ -575,6 +838,7 @@ async def create_room(sid, data):
         await sio.enter_room(sid, room.room_id)
     await emit_room_state(room)
     await emit_player_list_to_chat(room)
+    _schedule_bots(room)
     return {"ok": True, "room_id": room.room_id}
 
 @sio.event
@@ -600,9 +864,89 @@ async def join_room(sid, data):
         room.seat_to_sid[seat] = sid
         await sio.save_session(sid, {"room_id": room.room_id})
         await sio.enter_room(sid, room.room_id)
+        if room.is_free_match:
+            _sync_free_room_bots_locked(room)
     await emit_room_state(room)
     await emit_player_list_to_chat(room)
+    _schedule_bots(room)
     return {"ok": True, "room_id": room.room_id}
+
+@sio.event
+async def free_match(sid, data):
+    """
+    Quick match into a shared room.
+    data: { "name": "<player name>" }
+    """
+    session = await sio.get_session(sid)
+    if session and session.get("room_id"):
+        return {"ok": True, "room_id": session.get("room_id")}
+    name = (data or {}).get("name") or f"Player-{sid[:4]}"
+    room = await manager.get_free_room()
+    async with room.lock:
+        if room.seats_filled() >= 4:
+            return {"ok": False, "error": "Room is full"}
+        seat = first_open_seat(room.seat_to_sid)
+        if seat is None:
+            return {"ok": False, "error": "Room is full"}
+        player = Player(sid=sid, name=name, seat_index=seat)
+        room.players_by_sid[sid] = player
+        room.seat_to_sid[seat] = sid
+        if not room.host_sid:
+            room.host_sid = sid
+        await sio.save_session(sid, {"room_id": room.room_id})
+        await sio.enter_room(sid, room.room_id)
+        _sync_free_room_bots_locked(room)
+        # Auto start for free match when at least 2 players (human/bot)
+        if room.seats_filled() >= 2 and room.state.phase == "waiting":
+            wall = make_standard_tiles()
+            dora = wall[:min(34, len(wall))]
+            wall = wall[min(34, len(wall)):]
+            for p in room.players():
+                p.points = p.initial_points if (p.initial_points is not None) else 300
+                p.hand = []
+                p.discards = []
+                p.ready = False
+                p.status = "playing"
+                p.bet_points = None
+            room.state = GameState(
+                phase="reset_prompt",
+                wall=wall,
+                turn_seat=None,
+                dealer_seat=0,
+                dealer_first_hidden=True,
+                dora_displays=dora,
+                results={},
+                cutin=None
+            )
+    await emit_room_state(room)
+    await emit_player_list_to_chat(room)
+    _schedule_bots(room)
+    return {"ok": True, "room_id": room.room_id}
+
+@sio.event
+async def add_bot(sid, data):
+    """Add a bot player to the room. data: {"name": "BOT"}"""
+    session = await sio.get_session(sid)
+    room = manager.get_room(session.get("room_id", "")) if session else None
+    if not room:
+        return {"ok": False, "error": "Not in a room"}
+    async with room.lock:
+        if room.seats_filled() >= 4:
+            return {"ok": False, "error": "Room is full"}
+        if sid != room.host_sid:
+            return {"ok": False, "error": "Only host can add bot"}
+        seat = first_open_seat(room.seat_to_sid)
+        if seat is None:
+            return {"ok": False, "error": "Room is full"}
+        name = (data or {}).get("name") or f"BOT-{seat+1}"
+        bot_sid = f"BOT-{room.room_id}-{seat}"
+        player = Player(sid=bot_sid, name=name, seat_index=seat, is_bot=True)
+        room.players_by_sid[bot_sid] = player
+        room.seat_to_sid[seat] = bot_sid
+    await emit_room_state(room)
+    await emit_player_list_to_chat(room)
+    _schedule_bots(room)
+    return {"ok": True}
 
 @sio.event
 async def set_ready(sid, data):
@@ -738,6 +1082,7 @@ async def start_game(sid, data):
             cutin=None
         )
     await emit_room_state(room)
+    _schedule_bots(room)
     return {"ok": True}
 
 
@@ -772,6 +1117,7 @@ async def set_bet_points(sid, data):
         if room.state.phase == "betting" and _all_children_bet(room):
             _start_playing_phase(room)
     await emit_room_state(room)
+    _schedule_bots(room)
     return {"ok": True}
 
 
@@ -805,6 +1151,7 @@ async def dealer_reset(sid, data):
 
         _prepare_betting_phase(room)
     await emit_room_state(room)
+    _schedule_bots(room)
     return {"ok": True}
 
 
@@ -878,6 +1225,7 @@ def _void_round_by_empty_wall(room: Room) -> None:
     st.turn_seat = None
     asyncio.create_task(auto_next_round(room.room_id))
     asyncio.create_task(emit_settlement_to_chat(room, st.results))
+    asyncio.create_task(_kick_broke_players(room.room_id))
 
 def _end_round(room: Room) -> None:
     st = room.state
@@ -955,6 +1303,7 @@ def _end_round(room: Room) -> None:
     # 清算後に必ず次ラウンド（配牌→betting）へ
     asyncio.create_task(auto_next_round(room.room_id))
     asyncio.create_task(emit_settlement_to_chat(room, st.results))
+    asyncio.create_task(_kick_broke_players(room.room_id))
 
 @sio.event
 async def draw_tile(sid, data):
@@ -964,43 +1313,15 @@ async def draw_tile(sid, data):
         return {"ok": False, "error": "Not in a room"}
     async with room.lock:
         st = room.state
-        if st.phase != "playing":
-            return {"ok": False, "error": "Not in playing phase"}
         p = room.players_by_sid.get(sid)
         if not p:
             return {"ok": False, "error": "Player not found"}
-        if p.seat_index != st.turn_seat:
-            return {"ok": False, "error": "Not your turn"}
-        if p.status != "playing":
-            return {"ok": False, "error": "You are not in playing state"}
-        if not st.wall:
-            _void_round_by_empty_wall(room)
+        err = _draw_tile_for_player(room, p)
+        if err:
             await emit_room_state(room)
-            return {"ok": False, "error": "Wall empty. Round ended."}
-        # 引く
-        tile = st.wall.pop()
-        p.hand.append(tile)
-        cutin = special_role_cutin(p.hand)
-        if cutin:
-            label = cutin["label"]
-            sound = cutin.get("sound", "normal")
-            st.cutin = {"seat": p.seat_index, "label": label, "sound": sound, "sig": f"{p.seat_index}:{len(p.hand)}:{label}:{sound}"}
-        else:
-            st.cutin = None
-        # バースト判定
-        if hand_total(p.hand) > TARGET and not is_special_role(p.hand):
-            p.status = "bust"
-            # 親がバーストしたら即終了
-            if p.seat_index == st.dealer_seat:
-                _end_round(room)
-            else:
-                # 次のアクティブへ
-                nxt = _next_active_seat(room, st.turn_seat)
-                if nxt is None:
-                    _end_round(room)
-                else:
-                    st.turn_seat = nxt
+            return {"ok": False, "error": err}
     await emit_room_state(room)
+    _schedule_bots(room)
     return {"ok": True}
 
 @sio.event
@@ -1010,29 +1331,15 @@ async def stay(sid, data):
     if not room:
         return {"ok": False, "error": "Not in a room"}
     async with room.lock:
-        st = room.state
-        if st.phase != "playing":
-            return {"ok": False, "error": "Not in playing phase"}
         p = room.players_by_sid.get(sid)
         if not p:
             return {"ok": False, "error": "Player not found"}
-        if p.seat_index != st.turn_seat:
-            return {"ok": False, "error": "Not your turn"}
-        if p.status != "playing":
-            return {"ok": False, "error": "You are not in playing state"}
-
-        p.status = "stay"
-        # 親がステイした時に特殊役なら即清算
-        if p.seat_index == st.dealer_seat and is_special_role(p.hand):
-            _end_round(room)
+        err = _stay_for_player(room, p)
+        if err:
             await emit_room_state(room)
-            return {"ok": True}
-        nxt = _next_active_seat(room, st.turn_seat)
-        if nxt is None:
-            _end_round(room)
-        else:
-            st.turn_seat = nxt
+            return {"ok": False, "error": err}
     await emit_room_state(room)
+    _schedule_bots(room)
     return {"ok": True}
 
 
@@ -1086,6 +1393,9 @@ async def leave_room(sid, data):
     except Exception:
         pass
     if room:
+        if room.is_free_match:
+            async with room.lock:
+                _sync_free_room_bots_locked(room)
         await emit_room_state(room)
     return {"ok": True}
 

@@ -368,7 +368,34 @@ body.game-waiting #actionBar {
   gap: 4px;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+}
+
+.seat-top .hand-horizontal.reversed {
+  flex-direction: row;
+}
+
+/* Fix height so JS centering can work predictably */
+.seat-left .hand-vertical,
+.seat-right .hand-vertical {
+  height: 100%;
+  padding-top: 144px;
+}
+
+.seat-top .hand-horizontal {
+  margin-top: 28px;
+}
+
+.hand-vertical.rotated-tiles,
+.river-vertical.rotated-tiles {
+  gap: 0px;
+}
+
+.hand-vertical.rotated-tiles .tile-img,
+.hand-vertical.rotated-tiles .tile-fallback,
+.river-vertical.rotated-tiles .tile-img,
+.river-vertical.rotated-tiles .tile-fallback {
+  margin: -2px 0;
 }
 
 .actions {
@@ -410,12 +437,14 @@ body.game-waiting #actionBar {
 /* Clickable hint */
 .clickable {
   cursor: pointer;
-  transform: translateY(0);
+  --tile-rot: 0deg;
+  --tile-ty: 0px;
+  transform: rotate(var(--tile-rot)) translateY(var(--tile-ty));
   transition: transform 80ms ease;
 }
 
 .clickable:hover {
-  transform: translateY(-4px);
+  --tile-ty: -4px;
 }
 
 /* Rivers arranged in rows of 6 like many UIs */
@@ -447,6 +476,25 @@ body.game-waiting #actionBar {
   align-items: center;
   justify-content: center;
   font-weight: 700;
+}
+
+/* Enlarge left/right players' tiles (desktop) */
+.seat-left .hand-vertical .tile-img.rotated-90,
+.seat-right .hand-vertical .tile-img.rotated-90,
+.seat-left .hand-vertical .tile-fallback.rotated-90,
+.seat-right .hand-vertical .tile-fallback.rotated-90 {
+  height: 60px !important;
+  width: 42px !important;
+}
+
+@media (max-width: 900px) {
+  .seat-left .hand-vertical .tile-img.rotated-90,
+  .seat-right .hand-vertical .tile-img.rotated-90,
+  .seat-left .hand-vertical .tile-fallback.rotated-90,
+  .seat-right .hand-vertical .tile-fallback.rotated-90 {
+    height: 40px !important;
+    width: 28px !important;
+  }
 }
 
 .tile-fallback.small {
@@ -503,6 +551,292 @@ body.game-waiting #actionBar {
 .reset-label{
   font-size: 12px;
   opacity: 0.85;
+}
+
+/* ---------------- Mobile layout ---------------- */
+@media (max-width: 900px) {
+  :root{
+    --ui-design-w: 1500;
+    --ui-design-h: 900;
+    --m-actionbar-bottom: -60px;
+    --m-actionbar-right: 12px;
+    --m-profile-right: 240px;
+    --m-bottom-seat-bottom: 66px;
+    --m-center-bottom: 120px;
+    --m-dora-top: 120px;
+    --m-top-seat-top: 26px;
+    --m-profile-offset: 220px;
+  }
+
+  body {
+    overflow: auto;
+  }
+
+  #app {
+    width: 112vw;
+    height: 112vh;
+    transform: scale(0.75);
+    transform-origin: top left;
+  }
+
+  header {
+    padding: 10px 12px;
+  }
+
+  h1 {
+    font-size: 18px;
+  }
+
+  .room-controls {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .room-controls input,
+  .room-controls button {
+    padding: 10px 12px;
+    font-size: 14px;
+    min-height: 40px;
+  }
+
+  main {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  #sidebar {
+    display: none;
+  }
+
+  .mahjong-table {
+    padding-bottom: 120px;
+    min-height: 100vh;
+  }
+
+  .seat-bottom {
+    width: 96%;
+    bottom: var(--m-bottom-seat-bottom);
+  }
+
+  .seat-left,
+  .seat-right {
+    height: 72%;
+  }
+
+  .seat-label {
+    font-size: 14px;
+    padding: 4px 8px;
+  }
+
+  .seat-top .seat-label {
+    top: -8px;
+  }
+
+  .seat-left .seat-label,
+  .seat-right .seat-label {
+    top: -8px;
+  }
+
+  .seat-bottom .seat-label {
+    position: fixed;
+    top: auto;
+    left: 50px;
+    right: auto;
+    bottom: var(--m-actionbar-bottom);
+    transform: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  .seat-bottom #bottomName {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .seat-bottom #bottomName .profile-name {
+    order: 1;
+    margin-right: 60px;
+  }
+
+  .seat-bottom #bottomName .profile-points {
+    order: 2;
+    font-weight: 700;
+  }
+
+  .seat-bottom #bottomName .profile-bet {
+    order: 3;
+    opacity: 0.85;
+    font-size: 12px;
+  }
+
+  .seat-top {
+    top: var(--m-top-seat-top);
+    width: 82%;
+  }
+
+  .seat-left {
+    left: 28px;
+  }
+
+  .seat-right {
+    right: 28px;
+  }
+
+  .action-bar {
+    position: fixed;
+    left: 50%;
+    bottom: var(--m-actionbar-bottom);
+    transform: translateX(-50%);
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .action-bar button {
+    min-height: 44px;
+    min-width: 92px;
+    font-size: 14px;
+  }
+
+  .room-controls button {
+    min-height: 44px;
+    min-width: 92px;
+    font-size: 14px;
+  }
+
+  .pts-input{
+    width: 120px;
+    min-height: 40px;
+    font-size: 15px;
+  }
+
+  .chat-log {
+    max-height: 220px;
+    font-size: 12px;
+  }
+
+  .tile-img {
+    width: 32px;
+    height: 48px;
+  }
+
+  .tile-img.small {
+    width: 22px;
+    height: 33px;
+  }
+
+  .tile-fallback {
+    width: 32px;
+    height: 48px;
+  }
+
+  .tile-fallback.small {
+    width: 22px;
+    height: 33px;
+  }
+
+  .dora-ribbon {
+    max-width: 96%;
+    padding: 4px 8px;
+  }
+
+  #doraRibbon {
+    top: var(--m-dora-top);
+    bottom: auto;
+    transform: translateX(-50%);
+  }
+
+  #doraRibbon .dora-row {
+    gap: 6px;
+  }
+
+  #doraRibbon .dora-group {
+    gap: 2px;
+  }
+
+  #doraRibbon .tile-img {
+    height: 32px !important;
+    width: auto;
+  }
+
+  #doraRibbon svg {
+    height: 32px !important;
+    width: auto !important;
+  }
+
+  #doraRibbon .tile-fallback {
+    height: 32px !important;
+    width: 32px !important;
+  }
+
+  /* Shrink dora tiles slightly on mobile */
+  #doraRibbon .tile-img,
+  #doraRibbon svg,
+  #doraRibbon .tile-fallback {
+    transform: scale(0.9);
+    transform-origin: center;
+  }
+
+  .center-field {
+    top: auto;
+    bottom: var(--m-center-bottom);
+    width: auto;
+    max-width: 88%;
+    height: var(--mobile-info-h, 28px);
+    padding: 2px 6px;
+    border-radius: 10px;
+  }
+
+  .round-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .round-info > div {
+    flex: 1 1 auto;
+  }
+
+  .round-info #wall {
+    font-weight: 700;
+  }
+
+  .wall-counter {
+    width: 60px;
+    height: 60px;
+    font-size: 24px;
+  }
+
+  .hand-horizontal,
+  .river-horizontal {
+    gap: 4px;
+  }
+
+  .hand-vertical,
+  .river-vertical {
+    gap: 2px;
+  }
+
+  #bottomHand {
+    transform: scale(0.8);
+    transform-origin: bottom center;
+  }
+
+  /* Shrink other players' tiles on mobile */
+  .seat-left .tile-img,
+  .seat-right .tile-img,
+  .seat-top .tile-img,
+  .seat-left .tile-fallback,
+  .seat-right .tile-fallback,
+  .seat-top .tile-fallback {
+    transform: scale(0.8);
+    transform-origin: center;
+  }
 }
 .stats-bar{
   margin-top: 10px;
@@ -866,4 +1200,24 @@ body.game-playing #actionBar {
 #btnDraw,
 #btnStay {
   display: inline-flex !important;
+}
+
+/* Mobile override for dora position (beats later global rule) */
+@media (max-width: 900px) {
+  #doraRibbon {
+    top: var(--m-dora-top) !important;
+    bottom: auto !important;
+  }
+
+  #actionBar {
+    position: fixed !important;
+    left: auto !important;
+    right: var(--m-actionbar-right) !important;
+    bottom: var(--m-actionbar-bottom) !important;
+    transform: none !important;
+  }
+
+  .volume-panel {
+    display: none !important;
+  }
 }
